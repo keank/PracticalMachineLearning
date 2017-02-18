@@ -1,0 +1,122 @@
+---
+title: "Machine Learning Course Project"
+author: "Kean"
+date: "January 16, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Summary
+In this project, I look to predict how well six people are performing weight-lifting exercises (ie. see if they have correct form) based on data from accelerometers. 
+
+#Project Instructions
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. 
+
+#Load data
+```{r, results='hide', warning=FALSE, message=FALSE}
+require(data.table)
+require(dplyr)
+require(verification)
+require(randomForest)
+require(caret)
+require(lubridate)
+
+# setwd('./Machine Learning/')
+trainurl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testurl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training=read.csv(trainurl,
+                  na.strings=c('NA','','#DIV/0!'))
+testing=read.csv(testurl, 
+                 na.strings=c('NA','','#DIV/0!'))
+```
+
+We load in the data identifying what counts as a 'NA' entry. 
+
+#Clean data
+```{r, warning=FALSE}
+#Training
+training=training[,-c(1:7)] # remove irrelevant info
+training=training[,colSums(is.na(training))==0] # only want complete data
+nearZeroVar(training, saveMetrics=F, names=T) #  check for non-zero var
+
+#Testing
+testing=testing[,c(names(training)[-53], 'problem_id')]
+
+```
+
+We clean the data by removing irrelevant data (eg. on tester identity, time) and columns that are complete. A check reveals that once these conditions are satisfied there are no more near zero variance columnns. 
+
+# Hold-out and Cross validation strategy
+Having split the data into training and test, the test data will be held out from the analysis till after model selection. The remaining data in the training set will undergo cross-validation for model selection. 
+
+The cross-validation strategy is to:
+1) Run 3-folds* cross validation to get an estimate of the error when using the both trees (rpart) and randomForest algorithmns.
+2) The best model will then be used on the 'testing' dataset, which was held out from all prior analysis. 
+
+\* Note: Random Forest tends not need cross validation because the process of fitting the forest uses bootstrapped samples. It thus tends not to overfit. However, rpart can still overfit and hence cross validaton can be helpful. To keep the methodology constant across methods, cross validation is done for both. 
+
+# Cross-validation and Model Fitting
+```{r, cache=TRUE}
+set.seed(133)
+k=3
+fold_index=createFolds(training$classe, k)
+n=floor(nrow(training)/k)
+
+results_rpart=list()
+for (i in 1:k){
+  # prepare data partitions
+  cv.training=training[-fold_index[[i]],]
+  cv.testing=training[fold_index[[i]],]
+
+  # fit model
+  fit_rpart=train(classe~., data=cv.training, method='rpart')
+  
+  # make predictions
+  prediction=predict(fit_rpart, newdata=cv.testing)
+  
+  # caclulate model accuracy for the ith fold
+  results_rpart[[i]]=confusionMatrix(prediction, cv.testing$classe)
+}
+results_rpart
+```
+
+We see that rpart does not predict accurately at all. These results are consistent across the 3 folds. 
+
+```{r, cache=TRUE}
+results_rf=list()
+for (i in 1:k){
+  # prepare data partitions
+  cv.training=training[-fold_index[[i]],]
+  cv.testing=training[fold_index[[i]],]
+
+  # fit model
+  fit_rf=randomForest(classe~., data=cv.training)
+  
+  # make predictions
+  prediction=predict(fit_rf, newdata=cv.testing)
+  
+  # caclulate model accuracy for the ith fold
+  results_rf[[i]]=confusionMatrix(prediction, cv.testing$classe)
+}
+results_rf
+
+```
+
+We see that Random Forest does much better, getting it correct almost all the time. Again results are consistent across the different folds. 
+
+# Model Selection, Fitting on All Training Data & Prediction on Testing Data
+
+Given the excellent performance of Random Forest, we select Random Forest as our model of choice. We then apply it on the testing set. Given the good cross-validated performance of Random Forest in the training set (ie. Accuracy near 1), I expect it to perform similarly well in the testing set. I hence expect an out-of-sample error rate of near 0. 
+ 
+```{r, cache=TRUE}
+fit_rf_alltraining=randomForest(classe~., data=training)
+prediction_test=predict(fit_rf_alltraining, newdata=testing)
+prediction_test
+```
+
+
